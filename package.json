@@ -1,6 +1,6 @@
 {
   "name": "@ruyam/miso-cli",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Terminal-native Solana Rust smart contract auditor CLI",
   "main": "index.js",
   "bin": {
