@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { discoverFiles } from './discovery.js';
 import { scanFiles } from './engine.js';
 import { displayResults, logToMarkdown, getPreviousScore, displayResults as renderResults } from './logger.js';
@@ -31,6 +32,11 @@ export async function runCLI() {
     case 'history':
       handleHistory();
       break;
+    case '--version':
+    case '-v':
+    case '-V':
+      handleVersion();
+      break;
     case 'help':
     case '-h':
     case '--help':
@@ -41,6 +47,13 @@ export async function runCLI() {
       displayHelp();
       process.exit(1);
   }
+}
+
+function handleVersion() {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
+  console.log(packageJson.version);
 }
 
 async function handleScan() {
@@ -616,6 +629,7 @@ function displayHelp() {
   \x1b[36mhistory\x1b[0m          Show the history log table from MISO.md
   \x1b[36mdev\x1b[0m              Report issues to the developer section
   \x1b[36mhelp\x1b[0m             Print this help menu
+  \x1b[36m--version, -v\x1b[0m    Print version info
 `);
 }
 
