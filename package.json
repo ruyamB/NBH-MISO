@@ -1,0 +1,23 @@
+{
+  "name": "@ruyam/miso-cli",
+  "version": "1.0.5",
+  "description": "Terminal-native Solana Rust smart contract auditor CLI",
+  "main": "index.js",
+  "bin": {
+    "miso": "bin/miso.js"
+  },
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start-hub": "node src/hub/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "pg": "^8.11.0"
+  }
+}

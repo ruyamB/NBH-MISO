@@ -1,0 +1,111 @@
+Here's the full context doc — copy this straight into your agent's system prompt / project context file (e.g., `CLAUDE.md` or similar).
+
+---
+
+# MISO — Project Context
+
+## What MISO Is
+
+MISO is a terminal-native CLI tool for auditing Solana smart contracts (Rust). It reads a contract's source, runs it through a local static analysis engine, and returns a confidence score (0–100) indicating deployment readiness. Users can deploy directly from the terminal once satisfied, or edit code and re-scan. No browser is required for the core workflow.
+
+**Positioning:** `npx miso scan` → boom, confidence score, in the terminal, no setup friction, no external AI cost.
+
+## Hard Constraints — Do Not Violate
+
+1. **No AI/LLM calls.** MISO does NOT use Gemini, OpenAI, or any inference API for analysis. Detection is 100% local, rule-based static analysis (pattern + structural matching against parsed Rust ASTs). This is a deliberate product decision to avoid per-scan cost and external dependency — do not suggest or default back to an AI-based approach.
+2. **Never reads `.env` files or secrets.** Hard-excluded at the file-discovery layer, not configurable: `.env*`, `*.pem`, `*.key`, keypair JSON, `id.json`, and any other common credential file patterns. This exclusion cannot be overridden by config or `.misoignore`.
+3. **`scan` is fully offline.** No network call happens during `scan`. Only `save` (Hub sync) and `deploy` touch the network.
+4. **Local audit trail is always free and always available.** `MISO.md` is written locally regardless of whether the user ever touches Hub. Hub is additive, not a dependency.
+
+## Auth Model
+
+- Users create a MISO Hub account on the web: **username (user address) + password**. That's the entire credential model — no separate API key, no separate "write key" concept.
+- Auth runs **once per project**. First `npx miso scan` in a project prompts for username/password, caches the session locally in that project (e.g. `.miso/config.json`, git-ignored, NOT `.env`). Every subsequent scan in that project skips auth entirely.
+- A different project triggers auth again, once, then caches for that project too.
+
+## Core CLI Commands
+
+```
+npx miso scan             # Local scan, prompts for auth on first run per project
+npx miso deploy           # Checks latest score vs threshold, deploys if cleared
+npx miso deploy --force   # Deploys even below threshold, prints a warning
+npx miso save             # Pushes current scan snapshot to MISO Hub (opt-in, explicit)
+npx miso revoke [--yes]   # Full wipe — see Revoke Behavior below
+npx miso config           # View/edit threshold, deploy command, active rule sets
+npx miso history          # Prints local scan history table from MISO.md
+npx miso help             # Command list
+```
+
+## Scan Behavior
+
+1. Discover `.rs` files in the project (Anchor-aware — reads `Anchor.toml` to scope to declared programs). Hard-excludes secrets per constraint #2 above.
+2. Parse source into an AST (e.g. via `syn`) — extract instructions, account structs, constraint attributes (`#[account(...)]`). Structural parsing, not regex-only.
+3. Run each parsed unit through a local rule library (versioned — see Rule Versioning below). Starter rule set (10–15 rules) should cover:
+   - Missing signer validation on mutable account instructions
+   - Unchecked arithmetic (missing `checked_add`/`checked_sub`/etc. on balance/lamport fields)
+   - PDA bump seed not validated / non-canonical bump
+   - Missing account ownership checks
+   - Unsafe account closing (lamport transfer without proper close)
+   - Missing rent-exemption checks
+   - Arbitrary/unconstrained CPI calls
+4. Score: start at 100, subtract per finding by severity — Critical −25, High −12, Medium −6, Low/Info −1 to −2. Floor at 0.
+5. Print score (color-coded: red <50, yellow 50–89, green ≥90) plus a findings list (severity, file:line, description, suggested fix).
+6. Append a timestamped entry to local `MISO.md` (create if it doesn't exist). Never overwrite — history is append-only.
+
+## MISO.md Format
+
+```markdown
+## Run — 2026-07-15 14:32 UTC
+**Confidence Score:** 82/100  (↑ +6 from previous run)
+**Rule Set Version:** v1.4
+**Files Scanned:** programs/vault/src/lib.rs, programs/vault/src/instructions/deposit.rs
+
+### Findings
+- 🔴 **Critical** — Missing signer check on `withdraw` instruction (lib.rs:114)
+- 🟡 **Medium** — Integer overflow possible in fee calculation (deposit.rs:58)
+- 🔵 **Info** — Consider using checked_add instead of raw addition (deposit.rs:60)
+
+### Areas for Improvement
+- Add explicit signer/ownership validation on all mutable account instructions.
+- Replace unchecked arithmetic with checked_* equivalents throughout.
+---
+```
+
+## Deploy Behavior
+
+- Default confidence threshold: **90**.
+- `deploy` always prints an explicit check line, even on a clean pass — never a silent jump to deploy:
+  - Below threshold: `"Score 82/100 is below threshold 90 — cannot deploy. Use --force to override."` → stop.
+  - Above threshold: `"Score 92/100 clears threshold 90 — proceeding with deploy."` → proceed.
+- `deploy` is a wrapper, not a reimplementation — it shells out to the project's existing deploy tooling (`anchor deploy` for Anchor projects, `solana program deploy` otherwise, or a custom command set via `miso config`). MISO does not manage deploy keys itself.
+- `--force` bypasses the threshold but still prints a warning.
+
+## Hub (Separate Web Product)
+
+- Hub is a website — NOT part of the terminal tool. It shows the full version history of a contract: every scan, what changed, how findings evolved.
+- Sync to Hub is **opt-in via `npx miso save`** — never automatic on `scan`. Privacy by default.
+- Hub stores only findings metadata + scores, never raw source code.
+- Hub features: version timeline, score-over-time graph, diff view between any two runs (source diff + findings diff), per-contract dashboard, team visibility, and a public marketing landing page.
+- Hub does not run scans and does not handle deploys — those stay CLI-only.
+
+## Revoke Behavior
+
+`npx miso revoke` is a **complete wipe**, not a scoped logout. On confirmation (requires `--yes` flag or typed confirmation — this is destructive and must not fire accidentally):
+
+- Deletes local `.miso/config.json` (cached credentials).
+- Deletes local `MISO.md` from the codebase.
+- Deletes all Hub snapshots/version history for that account, server-side, permanently.
+- Leaves MISO in a blank state on that device — the next `npx miso scan` behaves exactly like a brand-new user: full auth prompt, fresh history, no residue of the old account.
+
+## Rule Set Versioning
+
+- Every scan records which rule library version was used (e.g. `Rule Set Version: v1.4`) in both `MISO.md` and Hub snapshots.
+- This matters because rule coverage grows over time — a score from an early, thin rule set is not directly comparable to one from a mature rule set. Don't let the agent treat historical scores as apples-to-apples without checking rule version.
+- New rules get added as new Solana exploit classes are discovered publicly or via internal research — maintain a `RULES.md` documenting each rule and when it was added.
+
+## Build Order (for sequencing work)
+
+1. **M1** — Core CLI + local rule engine + `MISO.md` logging (fully offline, no Hub, no deploy).
+2. **M2** — Deploy integration + threshold gating (`deploy`, `deploy --force`, `config`).
+3. **M3** — Hub backend/web app + `save` command for opt-in sync.
+4. **M4** — `revoke` (full wipe) + rule set versioning + error handling polish.

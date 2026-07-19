@@ -1,0 +1,212 @@
+import path from 'path';
+import { scanFiles } from '../src/engine.js';
+
+let failed = false;
+
+function assert(condition, message) {
+  if (!condition) {
+    console.error(`\x1b[31m✕ Test Failed: ${message}\x1b[0m`);
+    failed = true;
+  } else {
+    console.log(`\x1b[32m✔ Test Passed: ${message}\x1b[0m`);
+  }
+}
+
+console.log('\nStarting MISO Automated Test Suite...\n');
+
+// 1. Test Vulnerable Contract
+console.log('--- Testing Vulnerable Contract Scan ---');
+const vulnerablePath = path.join(process.cwd(), 'tests', 'fixtures', 'vulnerable.rs');
+const vulnResult = scanFiles([vulnerablePath]);
+
+console.log(`Computed Score: ${vulnResult.score}/100`);
+console.log(`Total Findings: ${vulnResult.findings.length}`);
+console.log('All Vulnerable Findings:', vulnResult.findings.map(f => ({ ruleId: f.ruleId, file: f.file, line: f.line, details: f.details })));
+
+// We expect all 7 rules to be triggered
+const triggeredRules = new Set(vulnResult.findings.map(f => f.ruleId));
+console.log('Triggered rules:', [...triggeredRules]);
+
+assert(vulnResult.score < 50, `Vulnerable contract score (${vulnResult.score}) should be below 50`);
+assert(triggeredRules.has('MISSING_SIGNER_CHECK'), 'Should trigger MISSING_SIGNER_CHECK');
+assert(triggeredRules.has('UNCHECKED_ARITHMETIC'), 'Should trigger UNCHECKED_ARITHMETIC');
+assert(triggeredRules.has('PDA_BUMP_UNVALIDATED'), 'Should trigger PDA_BUMP_UNVALIDATED');
+assert(triggeredRules.has('MISSING_OWNERSHIP_CHECK'), 'Should trigger MISSING_OWNERSHIP_CHECK');
+assert(triggeredRules.has('UNSAFE_ACCOUNT_CLOSE'), 'Should trigger UNSAFE_ACCOUNT_CLOSE');
+assert(triggeredRules.has('MISSING_RENT_EXEMPTION'), 'Should trigger MISSING_RENT_EXEMPTION');
+assert(triggeredRules.has('UNCONSTRAINED_CPI'), 'Should trigger UNCONSTRAINED_CPI');
+
+console.log('\n--- Testing Secure Contract Scan ---');
+const securePath = path.join(process.cwd(), 'tests', 'fixtures', 'secure.rs');
+const secureResult = scanFiles([securePath]);
+
+console.log(`Computed Score: ${secureResult.score}/100`);
+console.log(`Total Findings: ${secureResult.findings.length}`);
+console.log('All Secure Findings:', secureResult.findings.map(f => ({ ruleId: f.ruleId, file: f.file, line: f.line, details: f.details })));
+
+assert(secureResult.score === 100, `Secure contract score should be 100, got: ${secureResult.score}`);
+assert(secureResult.findings.length === 0, `Secure contract findings count should be 0, got: ${secureResult.findings.length}`);
+
+// --- Testing Milestone 2 Gating & Config ---
+console.log('\n--- Testing M2 Config & Deploy Commands ---');
+import { execSync } from 'child_process';
+import fs from 'fs';
+
+// Helper to strip ANSI escape codes
+function stripAnsi(str) {
+  return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+}
+
+// Helper to run command and capture output (redirecting stderr to stdout)
+function runCliCmd(cmd) {
+  try {
+    const output = execSync(cmd + ' 2>&1', { encoding: 'utf8' });
+    return stripAnsi(output);
+  } catch (err) {
+    return stripAnsi(err.stdout + err.stderr);
+  }
+}
+
+// Ensure clean state config first
+const configDir = path.join(process.cwd(), '.miso');
+const configFilePath = path.join(configDir, 'config.json');
+if (fs.existsSync(configFilePath)) {
+  fs.unlinkSync(configFilePath);
+}
+
+// 1. Check default config display
+let configOutput = runCliCmd('node bin/miso.js config');
+assert(configOutput.includes('Gating Threshold: 90/100'), 'Default gating threshold should be 90');
+assert(configOutput.includes('Active Rules:     default'), 'Default active rules should be default');
+
+// 2. Set threshold
+let setThresholdOutput = runCliCmd('node bin/miso.js config threshold 85');
+assert(setThresholdOutput.includes('Threshold successfully updated to 85/100'), 'Should update threshold');
+
+// 3. Set deployCommand
+let setDeployOutput = runCliCmd('node bin/miso.js config deployCommand "echo MockDeploy"');
+assert(setDeployOutput.includes('Deploy command successfully set to "echo MockDeploy"'), 'Should update deploy command');
+
+// 4. Set activeRules
+let setRulesOutput = runCliCmd('node bin/miso.js config activeRules default,owasp,extra');
+assert(setRulesOutput.includes('Active rules successfully updated to "default, owasp, extra"'), 'Should update active rules');
+
+// Verify configuration was updated
+configOutput = runCliCmd('node bin/miso.js config');
+assert(configOutput.includes('Gating Threshold: 85/100'), 'Threshold should be updated to 85');
+assert(configOutput.includes('Deploy Command:   echo MockDeploy'), 'Deploy command should be echo MockDeploy');
+assert(configOutput.includes('Active Rules:     default, owasp, extra'), 'Active rules should be updated');
+
+// 5. Test deploy gating logic
+// Let's create a temporary MISO.md with a score of 80/100
+const misoMdPath = path.join(process.cwd(), 'MISO.md');
+const originalMisoMd = fs.existsSync(misoMdPath) ? fs.readFileSync(misoMdPath, 'utf8') : null;
+
+// Add mock auth to avoid prompting during deploy command
+if (fs.existsSync(configFilePath)) {
+  const currentConfig = JSON.parse(fs.readFileSync(configFilePath, 'utf8'));
+  currentConfig.auth = { username: 'testuser', token: 'testtoken' };
+  fs.writeFileSync(configFilePath, JSON.stringify(currentConfig, null, 2), 'utf8');
+}
+
+fs.writeFileSync(misoMdPath, `## Run — 2026-07-15 14:32 UTC\n**Confidence Score:** 80/100\n**Rule Set Version:** v1.0\n**Files Scanned:** lib.rs\n`);
+
+// Threshold is 85. Score is 80. Deployment should fail.
+let deployOutput = runCliCmd('node bin/miso.js deploy');
+assert(deployOutput.includes('Score 80/100 is below threshold 85 — cannot deploy. Use --force to override.'), 'Deploy should be gated if below threshold');
+
+// Using --force flag should warn but bypass
+let deployForceOutput = runCliCmd('node bin/miso.js deploy --force');
+assert(deployForceOutput.includes('WARNING: Deploying below threshold. This contract may have unresolved findings.'), 'Deploy with --force should warn');
+assert(deployForceOutput.includes('Executing deploy tool: echo MockDeploy'), 'Deploy with --force should execute deploy command');
+
+// Setting threshold lower (e.g. 75) so 80 clears it
+runCliCmd('node bin/miso.js config threshold 75');
+let deployClearOutput = runCliCmd('node bin/miso.js deploy');
+assert(deployClearOutput.includes('Score 80/100 clears threshold 75 — proceeding with deploy.'), 'Deploy should proceed if score clears threshold');
+assert(deployClearOutput.includes('Executing deploy tool: echo MockDeploy'), 'Deploy should execute deploy command');
+
+// --- Testing Milestone 3 MISO Direct DB Integration ---
+console.log('\n--- Testing M3 Direct DB Integration ---');
+import { pool, initDb } from '../src/db.js';
+
+// Ensure tables exist
+await initDb();
+
+// Clear database entries for testuser
+try {
+  await pool.query("DELETE FROM users WHERE username = 'testuser'");
+} catch (e) {
+  // ignore
+}
+
+// 1. Direct DB Signup Verification
+const testToken = 'testpassword'; // We use password as token (auth_key)
+await pool.query(
+  'INSERT INTO users (username, auth_key, sign_in_count) VALUES ($1, $2, 1)',
+  ['testuser', testToken]
+);
+console.log('✔ Direct DB signup simulation succeeded');
+
+// 2. Direct DB Signin / Counter Verification
+const userResultBefore = await pool.query('SELECT sign_in_count FROM users WHERE username = $1', ['testuser']);
+const beforeCount = userResultBefore.rows[0].sign_in_count;
+assert(beforeCount === 1, 'Initial sign-in count should be 1');
+
+// Simulate sign-in (counter increment)
+const newCount = beforeCount + 1;
+await pool.query('UPDATE users SET sign_in_count = $1 WHERE username = $2', [newCount, 'testuser']);
+const userResultAfter = await pool.query('SELECT sign_in_count FROM users WHERE username = $1', ['testuser']);
+assert(userResultAfter.rows[0].sign_in_count === 2, 'Sign-in count should be incremented to 2');
+
+// 3. Test saving snapshot via CLI (writing directly to Neon DB)
+// Setup config to be authenticated
+const config = {
+  threshold: 90,
+  deployCommand: '',
+  activeRules: ['default'],
+  auth: {
+    username: 'testuser',
+    token: testToken
+  }
+};
+fs.writeFileSync(configFilePath, JSON.stringify(config, null, 2), 'utf8');
+
+// Run save command
+const saveOutput = runCliCmd('node bin/miso.js save');
+assert(saveOutput.includes('Snapshot successfully synchronized with MISO Hub dashboard!'), 'Snapshot sync should succeed');
+
+// 4. Verify snapshot was written directly to Neon DB
+const snapsResult = await pool.query('SELECT score FROM snapshots WHERE username = $1', ['testuser']);
+assert(snapsResult.rows.length === 1, 'Should have 1 synchronized snapshot in Neon DB');
+assert(snapsResult.rows[0].score !== undefined, 'Snapshot should contain score');
+
+// 5. Verify snapshot save fails when user status is revoked
+await pool.query("UPDATE users SET status = 'revoked' WHERE username = 'testuser'");
+const saveRevokedOutput = runCliCmd('node bin/miso.js save');
+assert(saveRevokedOutput.includes('Error: Unauthorized or revoked session.'), 'Save should fail when status is revoked');
+
+// Cleanup database and temporary files, restore original MISO.md
+if (fs.existsSync(configFilePath)) {
+  fs.unlinkSync(configFilePath);
+}
+try {
+  await pool.query("DELETE FROM users WHERE username = 'testuser'");
+} catch (e) {
+  // ignore
+}
+await pool.end();
+
+if (originalMisoMd) {
+  fs.writeFileSync(misoMdPath, originalMisoMd);
+} else if (fs.existsSync(misoMdPath)) {
+  fs.unlinkSync(misoMdPath);
+}
+
+if (failed) {
+  console.error('\n\x1b[31mSome tests failed. Check logs above.\x1b[0m\n');
+  process.exit(1);
+} else {
+  console.log('\n\x1b[32mAll tests completed successfully!\x1b[0m\n');
+  process.exit(0);
+}
