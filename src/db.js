@@ -33,4 +33,15 @@ export async function initDb() {
       rule_set_version TEXT NOT NULL
     );
   `);
+  await pool.query(`
+    ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS contract_version TEXT DEFAULT '0.1.0';
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS developer_issues (
+      id SERIAL PRIMARY KEY,
+      username TEXT NOT NULL,
+      issue TEXT NOT NULL,
+      timestamp TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
 }
