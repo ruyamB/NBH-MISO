@@ -4,15 +4,25 @@ import { fileURLToPath } from 'url';
 import { discoverFiles } from './discovery.js';
 import { scanFiles } from './engine.js';
 import { displayResults, logToMarkdown, getPreviousScore, displayResults as renderResults } from './logger.js';
-import { loadConfig, saveConfig, deleteConfig, ensureAuth, promptUser, getConfigPath } from './config.js';
+import { loadConfig, saveConfig, deleteConfig, ensureAuth, promptUser, getConfigPath, ensureApiKeyOrChoice } from './config.js';
+import { pool, initDb } from './db.js';
 
 export async function runCLI() {
   const args = process.argv.slice(2);
   const command = args[0] || 'help';
 
+  if (command.startsWith('provider-')) {
+    const key = command.slice(9).trim();
+    await handleProviderKey(key);
+    return;
+  }
+
   switch (command) {
     case 'scan':
       await handleScan();
+      break;
+    case 'provider':
+      await handleProviderKey(args[1] || '');
       break;
     case 'deploy':
       await handleDeploy(args.slice(1));
@@ -87,8 +97,15 @@ async function handleScan() {
     console.log(`Discovered ${targetFiles.length} Rust file(s). Running static analysis...`);
   }
 
-  // 2. Scan files
-  const result = scanFiles(targetFiles);
+  // 2. Ensure Gemini API Key or user choice
+  const { apiKey, staticOnly } = await ensureApiKeyOrChoice();
+
+  if (!staticOnly) {
+    console.log('Running hybrid AI + Static analysis...');
+  } else {
+    console.log('Running static analysis only...');
+  }
+  const result = await scanFiles(targetFiles, { apiKey, staticOnly });
 
   // 3. Output results to CLI
   displayResults(result);
@@ -348,8 +365,6 @@ async function handleDeploy(options) {
   }
 }
 
-import { pool, initDb } from './db.js';
-
 function getContractVersion() {
   let version = '0.1.0';
   try {
@@ -390,7 +405,7 @@ async function handleSave() {
     return;
   }
 
-  const scanResult = scanFiles(files);
+  const scanResult = await scanFiles(files, { apiKey: config.geminiApiKey });
   const contractVersion = getContractVersion();
 
   const snapshotId = `snap_${Date.now()}`;
@@ -545,7 +560,8 @@ function handleConfig(options) {
     console.log(`Gating Threshold: ${config.threshold}/100`);
     console.log(`Deploy Command:   ${config.deployCommand || '(default: anchor deploy / solana program deploy)'}`);
     console.log(`Active Rules:     ${config.activeRules.join(', ')}`);
-    console.log(`Auth Address:     ${config.auth ? config.auth.username : 'Not Authenticated'}`);
+    console.log(`User Gemini API Key: ${config.geminiApiKey ? '****' + config.geminiApiKey.slice(-4) : '(not set)'}`);
+    console.log(`Auth Address:        ${config.auth ? config.auth.username : 'Not Authenticated'}`);
     console.log();
     return;
   }
@@ -575,8 +591,12 @@ function handleConfig(options) {
     config.activeRules = rules;
     saveConfig(config);
     console.log(`\x1b[32m✔ Active rules successfully updated to "${rules.join(', ')}"\x1b[0m`);
+  } else if (key === 'geminiApiKey') {
+    config.geminiApiKey = val;
+    saveConfig(config);
+    console.log(`\x1b[32m✔ User Gemini API Key successfully saved.\x1b[0m`);
   } else {
-    console.error(`\x1b[31mError: Unsupported config option "${key}". Use "threshold", "deployCommand", or "activeRules".\x1b[0m`);
+    console.error(`\x1b[31mError: Unsupported config option "${key}". Use "threshold", "deployCommand", "activeRules", or "geminiApiKey".\x1b[0m`);
   }
 }
 
@@ -620,17 +640,46 @@ function displayHelp() {
 \x1b[1mUsage:\x1b[0m npx miso <command> [options]
 
 \x1b[1mCommands:\x1b[0m
-  \x1b[36mscan\x1b[0m             Local static analysis scan of Rust contracts (offline)
-  \x1b[36mdeploy\x1b[0m           Gatekeeper check against threshold and shell out to deploy command
-  \x1b[36mdeploy --force\x1b[0m   Bypass threshold checks and proceed with deploy
-  \x1b[36msave\x1b[0m             Sync audit snapshots/metadata to MISO Hub (simulated in M1)
-  \x1b[36mrevoke\x1b[0m           Completely clear local config, cache, and MISO.md logs
-  \x1b[36mconfig\x1b[0m           View or edit settings (threshold, deployCommand)
-  \x1b[36mhistory\x1b[0m          Show the history log table from MISO.md
-  \x1b[36mdev\x1b[0m              Report issues to the developer section
-  \x1b[36mhelp\x1b[0m             Print this help menu
-  \x1b[36m--version, -v\x1b[0m    Print version info
+  \x1b[36mscan\x1b[0m                   Local static analysis + AI scan of Rust contracts
+  \x1b[36mprovider-<key>\x1b[0m         Set your Groq (gsk_...) or Gemini (AIza...) API Key
+  \x1b[36mdeploy\x1b[0m                 Gatekeeper check against threshold and shell out to deploy command
+  \x1b[36mdeploy --force\x1b[0m         Bypass threshold checks and proceed with deploy
+  \x1b[36msave\x1b[0m                   Sync audit snapshots/metadata to MISO Hub
+  \x1b[36mrevoke\x1b[0m                 Completely clear local config, cache, and MISO.md logs
+  \x1b[36mconfig\x1b[0m                 View or edit settings (threshold, deployCommand, geminiApiKey, groqApiKey)
+  \x1b[36mhistory\x1b[0m                Show the history log table from MISO.md
+  \x1b[36mdev\x1b[0m                    Report issues to the developer section
+  \x1b[36mhelp\x1b[0m                   Print this help menu
+  \x1b[36m--version, -v\x1b[0m          Print version info
 `);
+}
+
+async function handleProviderKey(key) {
+  let apiKey = key;
+  if (!apiKey) {
+    apiKey = await promptUser('Enter your User Groq (gsk_...) or Gemini (AIza...) API Key: ', true);
+    apiKey = apiKey.trim();
+  }
+
+  if (!apiKey) {
+    console.error('\x1b[31mError: API Key cannot be empty.\x1b[0m');
+    return;
+  }
+
+  const config = loadConfig();
+  if (apiKey.startsWith('gsk_')) {
+    config.groqApiKey = apiKey;
+    process.env.GROQ_API_KEY = apiKey;
+    console.log(`\x1b[32m✔ User Groq API Key successfully configured!\x1b[0m`);
+  } else {
+    config.geminiApiKey = apiKey;
+    process.env.GEMINI_API_KEY = apiKey;
+    console.log(`\x1b[32m✔ User Gemini API Key successfully configured!\x1b[0m`);
+  }
+
+  config.allowStaticOnly = false;
+  saveConfig(config);
+  console.log(`Masked Key: ****${apiKey.slice(-4)}\n`);
 }
 
 // Check and install Solana CLI if not present

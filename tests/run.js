@@ -18,23 +18,25 @@ console.log('\nStarting MISO Automated Test Suite...\n');
 // 1. Test Vulnerable Contract
 console.log('--- Testing Vulnerable Contract Scan ---');
 const vulnerablePath = path.join(process.cwd(), 'tests', 'fixtures', 'vulnerable.rs');
-const vulnResult = scanFiles([vulnerablePath]);
+const vulnResult = await scanFiles([vulnerablePath]);
 
-console.log(`Computed Score: ${vulnResult.score}/100`);
+console.log(`Computed Confidence Score: ${vulnResult.score}/100 (AI: ${vulnResult.aiScore}, Static: ${vulnResult.staticScore})`);
 console.log(`Total Findings: ${vulnResult.findings.length}`);
 console.log('All Vulnerable Findings:', vulnResult.findings.map(f => ({ ruleId: f.ruleId, file: f.file, line: f.line, details: f.details })));
 
-// We expect all 7 rules to be triggered
+// We expect static rules to be triggered
 const triggeredRules = new Set(vulnResult.findings.map(f => f.ruleId));
 console.log('Triggered rules:', [...triggeredRules]);
 
 assert(vulnResult.score < 50, `Vulnerable contract score (${vulnResult.score}) should be below 50`);
 assert(triggeredRules.has('MISSING_SIGNER_CHECK'), 'Should trigger MISSING_SIGNER_CHECK');
 assert(triggeredRules.has('MISSING_OWNERSHIP_CHECK'), 'Should trigger MISSING_OWNERSHIP_CHECK');
+assert(vulnResult.aiScore !== undefined, 'Result should include aiScore');
+assert(vulnResult.staticScore !== undefined, 'Result should include staticScore');
 
 console.log('\n--- Testing Secure Contract Scan ---');
 const securePath = path.join(process.cwd(), 'tests', 'fixtures', 'secure.rs');
-const secureResult = scanFiles([securePath]);
+const secureResult = await scanFiles([securePath]);
 
 console.log(`Computed Score: ${secureResult.score}/100`);
 console.log(`Total Findings: ${secureResult.findings.length}`);
@@ -42,6 +44,13 @@ console.log('All Secure Findings:', secureResult.findings.map(f => ({ ruleId: f.
 
 assert(secureResult.score === 100, `Secure contract score should be 100, got: ${secureResult.score}`);
 assert(secureResult.findings.length === 0, `Secure contract findings count should be 0, got: ${secureResult.findings.length}`);
+
+// Test prompt loader module
+import { loadPromptContext } from '../src/ai/prompts.js';
+const prompts = loadPromptContext();
+assert(typeof prompts.systemPrompt === 'string' && prompts.systemPrompt.length > 0, 'Prompt loader should load systemPrompt');
+assert(typeof prompts.instructions === 'string' && prompts.instructions.length > 0, 'Prompt loader should load instructions');
+assert(typeof prompts.rules === 'string' && prompts.rules.length > 0, 'Prompt loader should load rules');
 
 // --- Testing Milestone 2 Gating & Config ---
 console.log('\n--- Testing M2 Config & Deploy Commands ---');
@@ -87,11 +96,16 @@ assert(setDeployOutput.includes('Deploy command successfully set to "echo MockDe
 let setRulesOutput = runCliCmd('node bin/miso.js config activeRules default,owasp,extra');
 assert(setRulesOutput.includes('Active rules successfully updated to "default, owasp, extra"'), 'Should update active rules');
 
+// 5. Set geminiApiKey
+let setApiKeyOutput = runCliCmd('node bin/miso.js config geminiApiKey test_gemini_key_1234');
+assert(setApiKeyOutput.includes('User Gemini API Key successfully saved.'), 'Should update geminiApiKey');
+
 // Verify configuration was updated
 configOutput = runCliCmd('node bin/miso.js config');
 assert(configOutput.includes('Gating Threshold: 85/100'), 'Threshold should be updated to 85');
 assert(configOutput.includes('Deploy Command:   echo MockDeploy'), 'Deploy command should be echo MockDeploy');
 assert(configOutput.includes('Active Rules:     default, owasp, extra'), 'Active rules should be updated');
+assert(configOutput.includes('User Gemini API Key: ****1234'), 'Gemini API key mask should be displayed');
 
 // 5. Test deploy gating logic
 // Let's create a temporary MISO.md with a score of 80/100
@@ -137,6 +151,7 @@ await initDb();
 
 // Clear database entries for testuser
 try {
+  await pool.query("DELETE FROM snapshots WHERE username = 'testuser'");
   await pool.query("DELETE FROM users WHERE username = 'testuser'");
 } catch (e) {
   // ignore
@@ -185,14 +200,15 @@ assert(saveOutput.includes('Snapshot successfully saved locally to .miso/snapsho
 assert(saveOutput.includes('Snapshot successfully synchronized with MISO Hub dashboard!'), 'Snapshot sync should succeed');
 
 // 4. Verify snapshot was written directly to Neon DB
+const expectedVersion = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
 const snapsResult = await pool.query('SELECT score, contract_version, files_scanned FROM snapshots WHERE username = $1', ['testuser']);
 assert(snapsResult.rows.length === 1, 'Should have 1 synchronized snapshot in Neon DB');
 assert(snapsResult.rows[0].score !== undefined, 'Snapshot should contain score');
-assert(snapsResult.rows[0].contract_version === '1.0.5', 'Snapshot should contain correct contract version in DB');
+assert(snapsResult.rows[0].contract_version === expectedVersion, 'Snapshot should contain correct contract version in DB');
 const dbFiles = snapsResult.rows[0].files_scanned;
 assert(Array.isArray(dbFiles) && dbFiles.length > 0, 'Database files_scanned should be an array');
 assert(dbFiles[0].name !== undefined, 'Each file entry in DB files_scanned should have name');
-assert(dbFiles[0].version === '1.0.5', 'Each file entry in DB files_scanned should contain current version');
+assert(dbFiles[0].version === expectedVersion, 'Each file entry in DB files_scanned should contain current version');
 
 // Verify local snapshot file
 assert(fs.existsSync(localSnapshotsDir), 'Local snapshots folder should exist');
@@ -202,7 +218,7 @@ const savedData = JSON.parse(fs.readFileSync(path.join(localSnapshotsDir, localS
 assert(savedData.contractFiles !== undefined, 'Local snapshot should save contract file contents');
 assert(Array.isArray(savedData.contractFiles) && savedData.contractFiles.length > 0, 'Local snapshot should contain non-empty contract files array');
 assert(savedData.contractFiles[0].name !== undefined, 'Each file entry in snapshot should have name');
-assert(savedData.contractFiles[0].version === '1.0.5', 'Each file entry in snapshot should contain current version');
+assert(savedData.contractFiles[0].version === expectedVersion, 'Each file entry in snapshot should contain current version');
 // Cleanup local snapshot folder
 fs.rmSync(localSnapshotsDir, { recursive: true, force: true });
 
