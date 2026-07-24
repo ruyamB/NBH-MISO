@@ -6,6 +6,7 @@ import { scanFiles } from './engine.js';
 import { displayResults, logToMarkdown, getPreviousScore, displayResults as renderResults } from './logger.js';
 import { loadConfig, saveConfig, deleteConfig, ensureAuth, promptUser, getConfigPath, ensureApiKeyOrChoice } from './config.js';
 import { pool, initDb } from './db.js';
+import { promptSelfLearningLoop } from './learning/prompt.js';
 
 export async function runCLI() {
   const args = process.argv.slice(2);
@@ -113,6 +114,9 @@ async function handleScan() {
   // 4. Append history to MISO.md
   logToMarkdown(result);
   console.log('\x1b[32m✔ Scan trail written to local MISO.md\x1b[0m\n');
+
+  // 5. Miso Self-Learning Loop
+  await promptSelfLearningLoop(result);
 }
 
 async function handleDeploy(options) {

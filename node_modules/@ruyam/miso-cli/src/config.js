@@ -7,6 +7,9 @@ const DEFAULT_CONFIG = {
   threshold: 90,
   deployCommand: '',
   activeRules: ['default'],
+  geminiApiKey: '',
+  groqApiKey: '',
+  allowStaticOnly: false,
   auth: null
 };
 
@@ -185,5 +188,85 @@ export async function linkProject(config) {
   } catch (err) {
     console.error('\x1b[31mError: Could not connect to Neon database.\x1b[0m', err.message);
     return false;
+  }
+}
+
+function isPlaceholderKey(key) {
+  if (!key) return true;
+  const k = key.trim().toUpperCase();
+  return k.includes('YOUR_SECRET') || k.includes('PASTE_YOUR') || k.includes('YOUR_GEMINI') || k.includes('YOUR_KEY');
+}
+
+/**
+ * Ensures Groq or Gemini API key or user mode preference is established before scanning.
+ */
+export async function ensureApiKeyOrChoice() {
+  const config = loadConfig();
+  const groqEnv = process.env.GROQ_API_KEY || process.env.MISO_GROQ_API_KEY || '';
+  const geminiEnv = process.env.GEMINI_API_KEY || process.env.MISO_GEMINI_API_KEY || '';
+
+  if (groqEnv && !isPlaceholderKey(groqEnv)) {
+    return { apiKey: groqEnv, provider: 'groq', staticOnly: false };
+  }
+
+  if (config.groqApiKey && !isPlaceholderKey(config.groqApiKey)) {
+    return { apiKey: config.groqApiKey, provider: 'groq', staticOnly: false };
+  }
+
+  if (geminiEnv && !isPlaceholderKey(geminiEnv)) {
+    return { apiKey: geminiEnv, provider: 'gemini', staticOnly: false };
+  }
+
+  if (config.geminiApiKey && !isPlaceholderKey(config.geminiApiKey)) {
+    return { apiKey: config.geminiApiKey, provider: 'gemini', staticOnly: false };
+  }
+
+  if (process.env.MISO_TEST === 'true') {
+    return { apiKey: '', provider: 'mock', staticOnly: false };
+  }
+
+  while (true) {
+    console.log('\n\x1b[36m--- MISO AI Security Scanner Setup ---\x1b[0m');
+    const hasKey = await promptUser('Do you have your own Groq or Gemini API Key for AI scanning? (y/N): ');
+    const normalizedHasKey = hasKey.trim().toLowerCase();
+
+    if (normalizedHasKey === 'y' || normalizedHasKey === 'yes') {
+      const apiKeyInput = await promptUser('Enter your Groq (gsk_...) or Gemini (AIzaSy...) API Key: ', true);
+      const apiKey = apiKeyInput.trim();
+      if (!apiKey) {
+        console.log('\x1b[31mError: API Key cannot be empty. Please try again.\x1b[0m');
+        continue;
+      }
+
+      let provider = 'gemini';
+      if (apiKey.startsWith('gsk_')) {
+        provider = 'groq';
+        config.groqApiKey = apiKey;
+        process.env.GROQ_API_KEY = apiKey;
+        console.log('\x1b[32m✔ User Groq API Key saved to local configuration.\x1b[0m\n');
+      } else {
+        provider = 'gemini';
+        config.geminiApiKey = apiKey;
+        process.env.GEMINI_API_KEY = apiKey;
+        console.log('\x1b[32m✔ User Gemini API Key saved to local configuration.\x1b[0m\n');
+      }
+
+      config.allowStaticOnly = false;
+      saveConfig(config);
+      return { apiKey, provider, staticOnly: false };
+    } else {
+      console.log('\x1b[33m\nWarning: Static-only analysis is not recommended. It may miss complex logic or security vulnerabilities.\x1b[0m');
+      const confirmStatic = await promptUser('Are you okay with proceeding with static analysis only? (y/N): ');
+      const normalizedConfirm = confirmStatic.trim().toLowerCase();
+
+      if (normalizedConfirm === 'y' || normalizedConfirm === 'yes') {
+        config.allowStaticOnly = true;
+        saveConfig(config);
+        console.log('\x1b[33mProceeding with static analysis scan...\x1b[0m\n');
+        return { apiKey: '', provider: 'none', staticOnly: true };
+      } else {
+        console.log('Returning to API key setup prompt...');
+      }
+    }
   }
 }
