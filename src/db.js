@@ -44,4 +44,22 @@ export async function initDb() {
       timestamp TIMESTAMPTZ DEFAULT NOW()
     );
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS vulnerability_knowledge (
+      id TEXT PRIMARY KEY,
+      vulnerability_id TEXT NOT NULL,
+      language TEXT NOT NULL,
+      compiler_version TEXT,
+      vulnerability_type TEXT NOT NULL,
+      severity TEXT NOT NULL,
+      embedding TEXT,
+      ast_pattern TEXT,
+      bytecode_pattern TEXT,
+      ai_reasoning TEXT,
+      suggested_fix TEXT,
+      confidence INTEGER DEFAULT 0,
+      frequency INTEGER DEFAULT 1,
+      timestamp TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
 }

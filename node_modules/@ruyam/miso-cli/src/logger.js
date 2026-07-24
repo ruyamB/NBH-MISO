@@ -51,10 +51,16 @@ export function getPreviousScore() {
 }
 
 export function displayResults(scanResult) {
-  const { score, findings, filesScanned } = scanResult;
+  const { score, staticScore, aiScore, margin, findings, filesScanned } = scanResult;
 
   console.log(`\n${COLORS.bold}--- MISO Scan Summary ---${COLORS.reset}`);
   console.log(`Confidence Score: ${getColoredScore(score)}`);
+  
+  if (aiScore !== undefined && staticScore !== undefined) {
+    const marginStr = margin !== undefined ? (margin >= 0 ? `+${margin}%` : `${margin}%`) : '±0%';
+    console.log(`Score Breakdown:  75% AI (${aiScore}/100) + 25% Static (${staticScore}/100) [Margin: ${marginStr}]`);
+  }
+
   console.log(`Files Scanned:    ${filesScanned.length}`);
   
   const prevScore = getPreviousScore();
@@ -78,13 +84,14 @@ export function displayResults(scanResult) {
 
   for (const finding of sortedFindings) {
     const sym = getSeveritySymbol(finding.severity);
-    console.log(` ${sym} [${finding.severity}] ${finding.file}:${finding.line} - ${COLORS.bold}${finding.details}${COLORS.reset}`);
+    const srcTag = finding.source ? ` [${finding.source.toUpperCase()}]` : '';
+    console.log(` ${sym} [${finding.severity}]${srcTag} ${finding.file}:${finding.line} - ${COLORS.bold}${finding.details}${COLORS.reset}`);
     console.log(`    Fix: ${finding.recommendation}\n`);
   }
 }
 
 export function logToMarkdown(scanResult, ruleSetVersion = 'v1.0') {
-  const { score, findings, filesScanned } = scanResult;
+  const { score, staticScore, aiScore, margin, findings, filesScanned } = scanResult;
   const filePath = path.join(process.cwd(), 'MISO.md');
 
   const now = new Date();
@@ -99,6 +106,10 @@ export function logToMarkdown(scanResult, ruleSetVersion = 'v1.0') {
 
   let mdContent = `## Run — ${utcString}\n`;
   mdContent += `**Confidence Score:** ${score}/100${trendText}\n`;
+  if (aiScore !== undefined && staticScore !== undefined) {
+    const marginStr = margin !== undefined ? (margin >= 0 ? `+${margin}%` : `${margin}%`) : '±0%';
+    mdContent += `**Score Breakdown:** 75% AI (${aiScore}) + 25% Static (${staticScore}) [Margin: ${marginStr}]\n`;
+  }
   mdContent += `**Rule Set Version:** ${ruleSetVersion}\n`;
   mdContent += `**Files Scanned:** ${filesScanned.join(', ')}\n\n`;
 
@@ -112,7 +123,8 @@ export function logToMarkdown(scanResult, ruleSetVersion = 'v1.0') {
 
     for (const finding of sortedFindings) {
       const sym = getSeveritySymbol(finding.severity);
-      mdContent += `- ${sym} **${finding.severity}** — ${finding.details} (${finding.file}:${finding.line})\n`;
+      const srcTag = finding.source ? ` [${finding.source.toUpperCase()}]` : '';
+      mdContent += `- ${sym} **${finding.severity}**${srcTag} — ${finding.details} (${finding.file}:${finding.line})\n`;
     }
   }
 

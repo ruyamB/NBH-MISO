@@ -3,8 +3,22 @@ import path from 'path';
 import { parseSource } from './parser.js';
 import { RULES } from './rules.js';
 import { runAIScan } from './ai/scanner.js';
+import { getRelevantKnowledge } from './learning/knowledge.js';
+import { findMatchingVulnerabilityPatterns } from './learning/retrieval.js';
 
 export async function scanFiles(filePaths, options = {}) {
+  // 0. Pre-Scan: Check database for similar vulnerability patterns
+  const shouldCheckDbMatch = options.checkDbMatch || (!options.forceFresh && process.env.MISO_TEST !== 'true');
+  if (shouldCheckDbMatch) {
+    const dbMatch = await findMatchingVulnerabilityPatterns(filePaths, options);
+    if (dbMatch.found) {
+      console.log('\x1b[32m✔ Found matching vulnerability pattern(s) in Miso Knowledge Database!\x1b[0m');
+      return dbMatch;
+    }
+  }
+
+  console.log('No matching vulnerability pattern in database. Starting fresh analysis...');
+
   const allFindings = [];
   const filesScanned = [];
 
@@ -53,14 +67,17 @@ export async function scanFiles(filePaths, options = {}) {
     filesScanned
   };
 
-  // 2. AI Scanning Engine
+  // 2. AI Scanning Engine with Knowledge Retrieval (RAG)
   let aiScore = staticScore;
   let aiResult = { aiScore: staticScore, summary: 'Static analysis scan only.', findings: [] };
   let margin = 0;
   let confidenceScore = staticScore;
 
   if (!options.staticOnly) {
-    aiResult = await runAIScan(filePaths, { staticResult, apiKey: options.apiKey });
+    const vulnerabilityTypes = allFindings.map(f => f.ruleId);
+    const relevantKnowledge = await getRelevantKnowledge(vulnerabilityTypes, 3);
+
+    aiResult = await runAIScan(filePaths, { staticResult, apiKey: options.apiKey, relevantKnowledge });
     aiScore = aiResult.aiScore;
 
     if (aiResult.failed) {
