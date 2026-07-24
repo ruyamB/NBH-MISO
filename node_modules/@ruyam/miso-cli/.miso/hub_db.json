@@ -1,0 +1,10 @@
+{
+  "users": [
+    {
+      "username": "testuser",
+      "password": "testpassword",
+      "token": "miso-session-dGVzdHVzZXI="
+    }
+  ],
+  "snapshots": []
+}
