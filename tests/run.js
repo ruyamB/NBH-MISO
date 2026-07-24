@@ -65,10 +65,10 @@ function stripAnsi(str) {
 // Helper to run command and capture output (redirecting stderr to stdout)
 function runCliCmd(cmd) {
   try {
-    const output = execSync(cmd + ' 2>&1', { encoding: 'utf8' });
+    const output = execSync(cmd + ' 2>&1', { encoding: 'utf8', env: { ...process.env, MISO_TEST: 'true' } });
     return stripAnsi(output);
   } catch (err) {
-    return stripAnsi(err.stdout + err.stderr);
+    return stripAnsi((err.stdout || '') + (err.stderr || ''));
   }
 }
 
@@ -107,6 +107,11 @@ assert(configOutput.includes('Deploy Command:   echo MockDeploy'), 'Deploy comma
 assert(configOutput.includes('Active Rules:     default, owasp, extra'), 'Active rules should be updated');
 assert(configOutput.includes('User Gemini API Key: ****1234'), 'Gemini API key mask should be displayed');
 
+// Test usage command
+let usageOutput = runCliCmd('node bin/miso.js usage');
+assert(!isNaN(parseInt(usageOutput.trim())), 'Usage command should return a numeric token count');
+console.log('✔ Test Passed: usage command returns token usage count');
+
 // 5. Test deploy gating logic
 // Let's create a temporary MISO.md with a score of 80/100
 const misoMdPath = path.join(process.cwd(), 'MISO.md');
@@ -133,8 +138,12 @@ assert(deployForceOutput.includes('--- MISO Solana Deployment Funding ---'), 'De
 assert(deployForceOutput.includes('[Mock QR Code]'), 'Deploy should output Mock QR Code in test mode');
 assert(deployForceOutput.includes('Solana Pay Link:'), 'Deploy should print Solana Pay Link');
 assert(deployForceOutput.includes('Phantom Wallet Deep Link:'), 'Deploy should print Phantom Wallet Deep Link');
+assert(deployForceOutput.includes('Backpack Wallet Deep Link:'), 'Deploy should print Backpack Wallet Deep Link');
 assert(deployForceOutput.includes('Payment detected! Wallet balance is now 5 devnet SOL.'), 'Deploy should print payment confirmation');
 assert(deployForceOutput.includes('Executing deploy tool: echo MockDeploy'), 'Deploy with --force should execute deploy command');
+assert(deployForceOutput.includes('✔ Deployment Successful'), 'Deploy should print deployment successful heading');
+assert(deployForceOutput.includes('https://solscan.io/account/'), 'Deploy should print Solscan account link');
+assert(deployForceOutput.includes('https://solscan.io/tx/'), 'Deploy should print Solscan tx link');
 
 // Setting threshold lower (e.g. 75) so 80 clears it
 runCliCmd('node bin/miso.js config threshold 75');

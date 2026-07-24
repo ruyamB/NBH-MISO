@@ -107,11 +107,13 @@ async function runGroqAIScan(filePaths, options, apiKey) {
       const aiScore = typeof result.aiScore === 'number' ? Math.max(0, Math.min(100, Math.round(result.aiScore))) : 90;
       const findings = Array.isArray(result.findings) ? result.findings : [];
       const summary = result.summary || 'Groq AI scan completed successfully.';
+      const tokensUsed = data.usage?.total_tokens || Math.ceil(((promptContext.systemPrompt + promptContext.instructions + promptContext.rules + contractSource).length + responseText.length) / 4);
 
       return {
         aiScore,
         summary,
-        findings
+        findings,
+        tokensUsed
       };
     } catch (err) {
       lastErrText = err.message;
@@ -229,11 +231,13 @@ Return JSON with "aiScore" (0-100), "summary", and "findings" array.`;
       const aiScore = typeof result.aiScore === 'number' ? Math.max(0, Math.min(100, Math.round(result.aiScore))) : 90;
       const findings = Array.isArray(result.findings) ? result.findings : [];
       const summary = result.summary || 'Gemini AI scan completed successfully.';
+      const tokensUsed = data.usageMetadata?.totalTokenCount || Math.ceil((userPrompt.length + responseText.length) / 4);
 
       return {
         aiScore,
         summary,
-        findings
+        findings,
+        tokensUsed
       };
     } catch (err) {
       lastErrText = err.message;
@@ -315,6 +319,7 @@ function runMockAIScan(filePaths, staticResult) {
   return {
     aiScore,
     summary: 'Mock AI security scan completed.',
-    findings
+    findings,
+    tokensUsed: 0
   };
 }

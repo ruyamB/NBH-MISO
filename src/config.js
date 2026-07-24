@@ -10,7 +10,10 @@ const DEFAULT_CONFIG = {
   geminiApiKey: '',
   groqApiKey: '',
   allowStaticOnly: false,
-  auth: null
+  auth: null,
+  tokenUsage: {},
+  lastScanTokenUsage: {},
+  lastScanTokens: 0
 };
 
 export function getConfigPath() {
@@ -101,11 +104,79 @@ export function promptUser(query, hideInput = false) {
   });
 }
 
+/**
+ * Interactive Up/Down Arrow key menu selector for terminal CLI.
+ */
+export function promptSelect(title, choices, defaultIndex = 0) {
+  return new Promise((resolve) => {
+    if (process.env.MISO_TEST === 'true' || !process.stdin.isTTY) {
+      resolve(choices[defaultIndex].value);
+      return;
+    }
+
+    let selectedIndex = defaultIndex;
+    const stdin = process.stdin;
+    const stdout = process.stdout;
+
+    const render = () => {
+      stdout.write('\x1B[?25l');
+      stdout.write(`\x1b[1m${title}\x1b[0m (Use ↑/↓ arrow keys and press Enter):\n`);
+      choices.forEach((choice, index) => {
+        if (index === selectedIndex) {
+          stdout.write(`  \x1b[36m❯ ${choice.label}\x1b[0m\n`);
+        } else {
+          stdout.write(`    ${choice.label}\n`);
+        }
+      });
+    };
+
+    const cleanup = () => {
+      stdout.write('\x1B[?25h');
+      if (stdin.isRaw) {
+        stdin.setRawMode(false);
+      }
+      stdin.removeListener('keypress', onKeyPress);
+    };
+
+    readline.emitKeypressEvents(stdin);
+    if (stdin.setRawMode) {
+      stdin.setRawMode(true);
+    }
+    stdin.resume();
+
+    const onKeyPress = (str, key) => {
+      if (!key) return;
+      if (key.name === 'up' || key.name === 'k') {
+        selectedIndex = (selectedIndex - 1 + choices.length) % choices.length;
+        stdout.write(`\x1B[${choices.length + 1}A\x1B[0J`);
+        render();
+      } else if (key.name === 'down' || key.name === 'j') {
+        selectedIndex = (selectedIndex + 1) % choices.length;
+        stdout.write(`\x1B[${choices.length + 1}A\x1B[0J`);
+        render();
+      } else if (key.name === 'return' || key.name === 'enter') {
+        cleanup();
+        console.log(`Selected: \x1b[36m${choices[selectedIndex].label}\x1b[0m\n`);
+        resolve(choices[selectedIndex].value);
+      } else if (key.ctrl && key.name === 'c') {
+        cleanup();
+        process.exit(0);
+      }
+    };
+
+    stdin.on('keypress', onKeyPress);
+    render();
+  });
+}
+
 // Triggers authentication on first run of `scan` per project
 export async function ensureAuth() {
   const config = loadConfig();
   if (config.auth && config.auth.username) {
     return config.auth;
+  }
+  if (process.env.MISO_TEST === 'true') {
+    return { username: 'testuser', token: 'testpassword' };
   }
 
   console.log('\x1b[36m--- MISO Hub Account Registration / Login ---\x1b[0m');
@@ -270,3 +341,35 @@ export async function ensureApiKeyOrChoice() {
     }
   }
 }
+
+export function recordTokenUsage(apiKey, tokens) {
+  if (typeof tokens !== 'number') return;
+  const config = loadConfig();
+  if (!config.tokenUsage) config.tokenUsage = {};
+  if (!config.lastScanTokenUsage) config.lastScanTokenUsage = {};
+
+  if (apiKey) {
+    config.tokenUsage[apiKey] = (config.tokenUsage[apiKey] || 0) + tokens;
+    config.lastScanTokenUsage[apiKey] = tokens;
+  }
+  config.lastScanTokens = tokens;
+  saveConfig(config);
+}
+
+export function getRecentTokenUsage(apiKey) {
+  const config = loadConfig();
+  if (apiKey && config.lastScanTokenUsage && config.lastScanTokenUsage[apiKey] !== undefined) {
+    return config.lastScanTokenUsage[apiKey];
+  }
+  if (typeof config.lastScanTokens === 'number') {
+    return config.lastScanTokens;
+  }
+  return 0;
+}
+
+export function getTokenUsage(apiKey) {
+  if (!apiKey) return 0;
+  const config = loadConfig();
+  return config.tokenUsage?.[apiKey] || 0;
+}
+

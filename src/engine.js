@@ -5,6 +5,7 @@ import { RULES } from './rules.js';
 import { runAIScan } from './ai/scanner.js';
 import { getRelevantKnowledge } from './learning/knowledge.js';
 import { findMatchingVulnerabilityPatterns } from './learning/retrieval.js';
+import { recordTokenUsage } from './config.js';
 
 export async function scanFiles(filePaths, options = {}) {
   // 0. Pre-Scan: Check database for similar vulnerability patterns
@@ -13,6 +14,8 @@ export async function scanFiles(filePaths, options = {}) {
     const dbMatch = await findMatchingVulnerabilityPatterns(filePaths, options);
     if (dbMatch.found) {
       console.log('\x1b[32m✔ Found matching vulnerability pattern(s) in Miso Knowledge Database!\x1b[0m');
+      const activeKey = options.apiKey || process.env.GROQ_API_KEY || process.env.MISO_GROQ_API_KEY || process.env.GEMINI_API_KEY || process.env.MISO_GEMINI_API_KEY || '';
+      recordTokenUsage(activeKey, 0);
       return dbMatch;
     }
   }
@@ -79,6 +82,9 @@ export async function scanFiles(filePaths, options = {}) {
 
     aiResult = await runAIScan(filePaths, { staticResult, apiKey: options.apiKey, relevantKnowledge });
     aiScore = aiResult.aiScore;
+
+    const activeKey = options.apiKey || process.env.GROQ_API_KEY || process.env.MISO_GROQ_API_KEY || process.env.GEMINI_API_KEY || process.env.MISO_GEMINI_API_KEY || '';
+    recordTokenUsage(activeKey, typeof aiResult.tokensUsed === 'number' ? aiResult.tokensUsed : 0);
 
     if (aiResult.failed) {
       margin = 0;

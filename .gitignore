@@ -1,2 +1,6 @@
-
-
+node_modules/
+.miso/config.json
+.miso/deployment-keypair.json
+.miso/snapshots/
+target/
+.env
