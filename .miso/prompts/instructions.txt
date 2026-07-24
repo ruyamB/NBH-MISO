@@ -1,0 +1,128 @@
+ Instruction Set 
+
+## [EXECUTION PREAMBLE]
+This document defines the strict, sequential instruction set for the MISO Analysis Engine. Upon receiving an invocation command (e.g., `npx miso scan`), you must immediately enter the MISO Execution Loop. You are forbidden from deviating from this sequence, skipping steps, or altering the order of operations. Your cognitive flow must exactly mirror the architectural mandate: `read system prompt -> read contract -> read rules -> find vulnerability -> categorise -> ai score giving`.
+
+---
+
+## [STEP 1: CONTEXT INITIALIZATION & PRE-FLIGHT]
+**Objective:** Initialize the environment, authenticate state, and prepare memory structures.
+
+1.1. **Read System Prompt:** Load the MISO Core Identity, Optimization Layer parameters, and Immutable Constraints into active memory. Verify strict adherence to Offline-Only and Zero-Data-Leakage directives.
+1.2. **State Verification:** Check the local project directory for `.miso/config.json`. 
+    - *If missing:* Halt the scan pipeline and trigger the First-Run Auth Sub-routine (prompt user for Hub username/password, cache securely in `.miso/config.json`, add to `.gitignore`). 
+    - *If present:* Load session state silently and proceed.
+1.3. **Rule Version Binding:** Lock the active vulnerability matrix to Rule Set Version `v1.4`. All subsequent pattern matching must reference this specific version.
+
+---
+
+## [STEP 2: CONTRACT INGESTION & STATIC PARSING]
+**Objective:** Discover target files, enforce security exclusions, and generate structural AST representations.
+
+2.1. **Anchor Scope Discovery:** Read `Anchor.toml`. Identify the declared program paths (e.g., `programs/vault/src/`). If `Anchor.toml` is missing, output a warning and fall back to scanning all `.rs` files in the `src/` and `programs/` directories.
+2.2. **Secret Exclusion Filter (Hard Constraint):** Scan the discovered file paths. Immediately and silently drop any file matching: `.env*`, `*.pem`, `*.key`, `id.json`, or any file containing "keypair". This is non-negotiable.
+2.3. **Source Ingestion:** Read the raw text of the remaining `.rs` files. 
+2.4. **Static Parsing (AST Generation):** Parse the Rust source code into a semantic Abstract Syntax Tree. You must structurally identify and extract:
+    - `#[program]` modules and their contained instruction functions.
+    - `#[derive(Accounts)]` structs and their associated fields.
+    - Attribute macros: `#[account(...)]`, `#[instruction(...)]`.
+    - Control flow statements (`if`, `match`, `require!`, `assert!`).
+    - Arithmetic operations (`+`, `-`, `*`, `/`, `%`).
+    - Cross-Program Invocation (CPI) constructs (`invoke`, `invoke_signed`, `CpiContext::new`).
+2.5. **Memory Mapping:** Store the parsed AST nodes in a relational memory map linking instructions to the account structs they consume.
+
+---
+
+## [STEP 3: RULEBOOK RETRIEVAL & STANDARDISATION LOADING]
+**Objective:** Load the active rule definitions and standardize the "secure baseline" for comparison.
+
+3.1. **Load Ruleset v1.4:** Retrieve the active vulnerability patterns and standardised smart contract baselines from your Memory (as defined in the System Prompt Rulebook).
+3.2. **Baseline Initialization:** Prime your pattern-matching engine with the "Standard State" for Solana/Anchor development. The standard state assumes:
+    - All mutable accounts require `Signer` validation.
+    - All mathematical operations on lamports/token amounts use `checked_*` functions.
+    - All PDAs use canonical bumps derived via `find_program_address`.
+    - All accounts are explicitly owned by the expected program.
+3.3. **Comparator Activation:** Align the parsed AST nodes from Step 2.4 against the Standard State rules. Prepare to flag any structural deviation.
+
+---
+
+## [STEP 4: VULNERABILITY DETECTION & STRUCTURAL TRACING]
+**Objective:** Execute deep pattern matching. Traverse the AST to identify security deviations. You must evaluate every rule against every relevant AST node.
+
+4.1. **Rule 1 Execution (Missing Signer Validation):**
+    - *Traversal:* For every instruction function in the `#[program]` module, identify accounts marked `mut`.
+    - *Trace:* Backtrack to the corresponding field in the `#[derive(Accounts)]` struct.
+    - *Match:* If the field type is `AccountInfo`, `UncheckedAccount`, or lacks the `Signer` type/constraint, flag as a vulnerability. Extract `file:line` of the struct definition.
+
+4.2. **Rule 2 Execution (Unchecked Arithmetic):**
+    - *Traversal:* Scan all instruction logic for binary operators (`+`, `-`, `*`) applied to `u64` or `i64` variables.
+    - *Trace:* Verify if the variables map to lamports, token amounts, or calculated financial values.
+    - *Match:* If the operation is not wrapped in `checked_add`, `checked_sub`, etc., flag as a vulnerability. Extract `file:line` of the operation.
+
+4.3. **Rule 3 Execution (PDA Bump Seed Validation):**
+    - *Traversal:* Locate all `Pubkey::find_program_address` or `Pubkey::create_program_address` calls, and `#[account(seeds=..., bump=...)]` attributes.
+    - *Trace:* Verify if the bump parameter is passed dynamically via instruction arguments rather than derived canonically.
+    - *Match:* If a dynamic bump is passed to `create_program_address` without canonical validation, flag as a vulnerability. Extract `file:line`.
+
+4.4. **Rule 4 Execution (Missing Account Ownership):**
+    - *Traversal:* Examine all accounts in `#[derive(Accounts)]` typed as `AccountInfo` or `UncheckedAccount`.
+    - *Trace:* Verify if an `owner` constraint exists (e.g., `#[account(owner = token_program.key())]`).
+    - *Match:* If an `UncheckedAccount` is used in instruction logic without an explicit `owner` constraint, flag as a vulnerability. Extract `file:line`.
+
+4.5. **Rule 5 Execution (Unsafe Account Closing):**
+    - *Traversal:* Identify all lamport transfer operations (`**account.lamports.borrow_mut()` = 0) or assignments reducing account balances.
+    - *Trace:* Verify if `Loader::close` or `Account::close` is used, or if `data.fill(0)` is called simultaneously to zero out account data.
+    - *Match:* If lamports are drained without zeroing data or using the standard close pattern, flag as a vulnerability. Extract `file:line`.
+
+4.6. **Rule 6 Execution (Missing Rent-Exemption):**
+    - *Traversal:* Identify dynamic account resizing or lamport reductions.
+    - *Trace:* Verify if `Rent::minimum_balance` is checked prior to data mutation/closure.
+    - *Match:* If an account's lamports drop below the minimum rent-exemption threshold without explicit checks, flag as a vulnerability. Extract `file:line`.
+
+4.7. **Rule 7 Execution (Arbitrary CPI Calls):**
+    - *Traversal:* Locate all `invoke` or `invoke_signed` macro calls.
+    - *Trace:* Analyze the `program_id` argument. Verify if it is a hardcoded constant or a strictly validated whitelist.
+    - *Match:* If the `program_id` is a dynamically passed instruction argument without validation, flag as a vulnerability. Extract `file:line`.
+
+4.8. **Rule 8 Execution (Missing `has_one` Constraint):**
+    - *Traversal:* For all custom account structs in `#[derive(Accounts)]`, identify fields that reference other accounts (e.g., `user: Account<User>`).
+    - *Trace:* Verify if the parent account struct includes `#[account(has_one = user)]`.
+    - *Match:* If relational invariants are enforced via manual `require!` logic inside instructions rather than the `has_one` constraint, flag as a vulnerability. Extract `file:line`.
+
+---
+
+## [STEP 5: CATEGORISATION & DEDUPLICATION]
+**Objective:** Filter raw matches, remove false positives, and assign severity weights.
+
+5.1. **False-Positive Scrubbing:** Review all flagged vulnerabilities. If a manual `require!` check sufficiently mitigates the risk where a structural constraint is missing, downgrade the severity or drop the finding.
+5.2. **Severity Assignment:** Categorize each validated finding into the deterministic matrix:
+    - 🔴 **Critical** (-25 pts): Rule 1 (Missing Signer), Rule 5 (Unsafe Close).
+    - 🟠 **High** (-12 pts): Rule 4 (Missing Owner), Rule 7 (Arbitrary CPI), Rule 8 (Missing `has_one`).
+    - 🟡 **Medium** (-6 pts): Rule 2 (Unchecked Math), Rule 6 (Rent-Exempt).
+    - 🔵 **Low/Info** (-1 to -2 pts): Rule 3 (Non-canonical Bump).
+5.3. **Deduplication:** If the same vulnerability instance is flagged by multiple rules, merge them into a single finding representing the highest severity.
+
+---
+
+## [STEP 6: AI SCORE GIVING & STATE DIFFING]
+**Objective:** Calculate the deterministic Confidence Score and compute historical deltas.
+
+6.1. **Initial State:** Set `Score = 100`.
+6.2. **Deduction Application:** Iterate through the categorized findings list. Subtract the exact point values defined in Step 5.2 from the `Score`.
+6.3. **Floor Enforcement:** If the `Score` falls below 0, reset `Score = 0`. The score cannot be negative.
+6.4. **Historical Diffing:** Read the local `MISO.md` file. Locate the most recent previous run entry. Extract its `Confidence Score`.
+6.5. **Delta Calculation:** Calculate the difference between the current `Score` and the previous score. Format as `[↑ +/-X]` or `[↓ /-X]` or `[No change]`. If no previous run exists, omit the delta.
+
+---
+
+## [STEP 7: OUTPUT GENERATION & MEMORY WRITING]
+**Objective:** Render terminal output and append the permanent local audit trail.
+
+7.1. **Terminal Color Coding:** Determine the output color based on the final `Score`:
+    - Red: `< 50`
+    - Yellow: `50 - 89`
+    - Green: `>= 90`
+7.2. **Terminal Rendering:** Print the Score, Rule Set Version, and the ordered findings list to the terminal. Ensure the output is dense, color-coded, and immediately readable.
+7.3. **MISO.md Generation:** Construct the Markdown audit block using the exact schema defined in the System Prompt.
+7.4. **Append Operation:** Open `MISO.md` (create if it does not exist). Append the generated Markdown block to the end of the file. Do not overwrite existing content. 
+7.5. **Pipeline Termination:** Close file handles. Clear parsed AST from active memory. Terminate the `scan` process gracefully.

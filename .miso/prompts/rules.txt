@@ -1,0 +1,7 @@
+1. MISSING_SIGNER_CHECK: Verify all instruction handlers requiring authority/signatures enforce Signer account types or explicit Signer checks.
+2. MISSING_OWNERSHIP_CHECK: Verify accounts are checked for owner program ID matching.
+3. UNCHECKED_ARITHMETIC: Check for raw math operations (+, -, *) without checked_add/checked_sub or Anchor safety constraints.
+4. UNBOUNDED_ACCOUNT_SIZE: Check account initialization for proper size limits.
+5. PDA_BUMP_SEED_VALIDATION: Ensure canonical bump validation.
+6. ARBITRARY_CPI: Validate CPI program target.
+7. UNSAFE_ACCOUNT_CLOSING: Ensure lamports are cleared and account discriminator modified on close.
