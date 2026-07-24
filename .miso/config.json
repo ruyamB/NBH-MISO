@@ -1,0 +1,17 @@
+{
+  "threshold": 90,
+  "deployCommand": "",
+  "activeRules": [
+    "default"
+  ],
+  "geminiApiKey": "",
+  "groqApiKey": "",
+  "allowStaticOnly": false,
+  "auth": {
+    "username": "dell-notun",
+    "token": "ruyam123"
+  },
+  "tokenUsage": {},
+  "lastScanTokenUsage": {},
+  "lastScanTokens": 0
+}
