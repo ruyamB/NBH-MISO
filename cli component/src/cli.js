@@ -129,6 +129,14 @@ async function handleScan() {
 
   // 5. Miso Self-Learning Loop
   await promptSelfLearningLoop(result);
+
+  // 6. Save scanned contract to MISO Hub Website
+  if (process.env.MISO_TEST !== 'true' && process.stdin.isTTY) {
+    const saveToHub = await promptUser('Do you want to save this scanned contract snapshot to MISO Hub website? (y/N): ');
+    if (saveToHub.trim().toLowerCase() === 'y' || saveToHub.trim().toLowerCase() === 'yes') {
+      await handleSave();
+    }
+  }
 }
 async function handleDeploy(options) {
   // Phase 1 — Security Gate
@@ -563,12 +571,40 @@ async function handleSave() {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [snapshotId, auth.username, timestamp, scanResult.score, findingsJson, filesScannedJson, ruleSetVersion, contractVersion]
     );
+
+    // 3. Save into contract_versions table for MISO Hub website dashboard
+    let codeSnippet = '';
+    for (const file of files) {
+      if (fs.existsSync(file)) {
+        const relativePath = path.relative(process.cwd(), file).replace(/\\/g, '/');
+        const content = fs.readFileSync(file, 'utf8');
+        codeSnippet += `// File: ${relativePath}\n${content}\n\n`;
+      }
+    }
+    if (!codeSnippet.trim()) {
+      codeSnippet = '// Scanned Rust contract files recorded by MISO CLI';
+    }
+
+    await pool.query(
+      "UPDATE contract_versions SET status = 'archived' WHERE username = $1",
+      [auth.username]
+    );
+
+    const versionTag = contractVersion.startsWith('v') ? contractVersion : `v${contractVersion}`;
+    const deployedAt = new Date().toISOString().replace('T', ' ').substring(0, 16);
+    const commitHash = snapshotId.replace('snap_', '').substring(0, 8);
+
+    await pool.query(
+      `INSERT INTO contract_versions (username, version, deployed_at, audit_score, commit_hash, verified_by, status, code_snippet)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [auth.username, versionTag, deployedAt, scanResult.score, commitHash, 'MISO Pipeline Validator', 'active', codeSnippet]
+    );
   } catch (err) {
     console.error('\x1b[31mError: Failed to save snapshot to database:\x1b[0m', err.message);
     return;
   }
 
-  console.log('\x1b[32m✔ Snapshot successfully synchronized with MISO Hub dashboard!\x1b[0m');
+  console.log('\x1b[32m✔ Snapshot & scanned contract version successfully synchronized with MISO Hub website dashboard!\x1b[0m');
 }
 
 async function handleDev() {
@@ -724,13 +760,14 @@ function displayHelp() {
 
 \x1b[1mCommands:\x1b[0m
   \x1b[36mscan\x1b[0m                   Local static analysis + AI scan of Rust contracts
-  \x1b[36mprovider-<key>\x1b[0m         Set your Groq (gsk_...) or Gemini (AIza...) API Key
+  \x1b[36mprovider [key]\x1b[0m         Set Groq (gsk_...) or Gemini (AIza...) API Key for AI scans (otherwise static)
+  \x1b[36mprovider-<key>\x1b[0m         Set your Groq or Gemini API Key directly
+  \x1b[36musage [key]\x1b[0m            Returns token consumption for the most recent scan
   \x1b[36mdeploy\x1b[0m                 Gatekeeper check against threshold and shell out to deploy command
   \x1b[36mdeploy --force\x1b[0m         Bypass threshold checks and proceed with deploy
   \x1b[36msave\x1b[0m                   Sync audit snapshots/metadata to MISO Hub
   \x1b[36mrevoke\x1b[0m                 Completely clear local config, cache, and MISO.md logs
   \x1b[36mconfig\x1b[0m                 View or edit settings (threshold, deployCommand, geminiApiKey, groqApiKey)
-  \x1b[36musage [key]\x1b[0m            Returns token consumption for the most recent scan
   \x1b[36mhistory\x1b[0m                Show the history log table from MISO.md
   \x1b[36mdev\x1b[0m                    Report issues to the developer section
   \x1b[36mhelp\x1b[0m                   Print this help menu

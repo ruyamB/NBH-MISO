@@ -27,6 +27,8 @@ MISO is a terminal-native CLI tool for auditing Solana smart contracts (Rust). I
 
 ```
 npx miso scan             # Local scan, prompts for auth on first run per project
+npx miso provider [<key>] # Configure API key (Groq/Gemini) for AI-enhanced scanning; defaults to static analysis if unset
+npx miso usage [<key>]    # Show AI token consumption metrics of the most recent scan
 npx miso deploy           # Checks latest score vs threshold, deploys if cleared
 npx miso deploy --force   # Deploys even below threshold, prints a warning
 npx miso save             # Pushes current scan snapshot to MISO Hub (opt-in, explicit)

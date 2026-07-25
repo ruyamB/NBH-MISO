@@ -45,6 +45,19 @@ export async function initDb() {
     );
   `);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS contract_versions (
+      id SERIAL PRIMARY KEY,
+      username TEXT REFERENCES users(username) ON DELETE CASCADE,
+      version TEXT NOT NULL,
+      deployed_at TEXT NOT NULL,
+      audit_score INTEGER NOT NULL,
+      commit_hash TEXT NOT NULL,
+      verified_by TEXT NOT NULL,
+      status TEXT NOT NULL,
+      code_snippet TEXT NOT NULL
+    );
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS vulnerability_knowledge (
       id TEXT PRIMARY KEY,
       vulnerability_id TEXT NOT NULL,
