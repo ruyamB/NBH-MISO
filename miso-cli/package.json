@@ -1,0 +1,41 @@
+{
+  "name": "@ruyam/miso-cli",
+  "version": "2.0.0",
+  "description": "Terminal-native Solana Rust smart contract auditor with RAG-powered MISO AI auto-patcher",
+  "main": "src/index.js",
+  "bin": {
+    "miso": "bin/miso.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "rag/",
+    "templates/"
+  ],
+  "scripts": {
+    "test": "node tests/run.js",
+    "rag:ingest": "python rag/ingestion_pipeline.py",
+    "rag:ingest:win": "python rag/ingestion_pipeline.py"
+  },
+  "keywords": [
+    "solana",
+    "audit",
+    "rust",
+    "security",
+    "cli",
+    "rag",
+    "llm",
+    "anchor"
+  ],
+  "author": "ruyam",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@solana/web3.js": "^1.98.4",
+    "chalk": "^5.3.0",
+    "diff": "^5.2.0",
+    "inquirer": "^9.3.7",
+    "pg": "^8.11.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}

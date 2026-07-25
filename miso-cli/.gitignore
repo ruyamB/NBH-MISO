@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# Environment and Secret Files
+.env
+.env.local
+.env.*.local
+
+# Local MISO Session & Snapshot Cache
+.miso/
+*.bak
+
+# Build output
+dist/
+target/
