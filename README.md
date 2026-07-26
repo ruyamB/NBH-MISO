@@ -221,7 +221,3 @@ npm run dev
 Open `http://localhost:5173` to explore the interactive dashboard, documentation, and audit history visualizer.
 
 ---
-
-## 📄 License
-
-ISC License © ruyam
