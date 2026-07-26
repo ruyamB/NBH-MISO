@@ -6,6 +6,9 @@ import { handleScan }   from './scan.js';
 import { handleDeploy } from './deploy.js';
 import { handleSave }   from './save.js';
 import { handlePatch }  from './patch.js';
+import { handleCreate } from './create.js';
+import { handleRmKey }  from './rmkey.js';
+import { handleWhoAmI } from './whoami.js';
 import {
   loadConfig, saveConfig, deleteConfig,
   ensureAuth, promptUser, getConfigPath, getRecentTokenUsage
@@ -29,6 +32,18 @@ export async function runCLI() {
   }
 
   switch (command) {
+    case 'create':
+      await handleCreate(args.slice(1));
+      break;
+
+    case 'rmkey':
+      handleRmKey(args.slice(1));
+      break;
+
+    case 'whoami':
+      handleWhoAmI();
+      break;
+
     case 'scan':
       await handleScan(args.slice(1));
       break;
@@ -244,6 +259,7 @@ function displayHelp() {
 \x1b[1mUsage:\x1b[0m  miso <command> [options]
 
 \x1b[1mCore Commands:\x1b[0m
+  \x1b[36mcreate\x1b[0m                 Create a Solana Rust smart contract file (target confidence score: 30-50/100)
   \x1b[36mscan\x1b[0m                   Static + AI scan of Rust contracts → MISO.md
   \x1b[36mscan --file <path>\x1b[0m     Scan specific file(s) only
   \x1b[36mscan --provider <groq|gemini>\x1b[0m Force a specific AI provider for scan
@@ -256,11 +272,13 @@ function displayHelp() {
 
 \x1b[1mConfiguration:\x1b[0m
   \x1b[36mprovider-<key>\x1b[0m         Set Groq (gsk_...) or Gemini (AIza...) API Key
+  \x1b[36mrmkey --<gemini|grok>\x1b[0m  Remove current Gemini or Grok API key (re-prompts on next scan)
   \x1b[36mconfig\x1b[0m                 View current MISO settings
   \x1b[36mconfig threshold <n>\x1b[0m   Set deploy threshold (0–100)
   \x1b[36mconfig geminiApiKey <k>\x1b[0m Set Gemini API key
 
 \x1b[1mUtilities:\x1b[0m
+  \x1b[36mwhoami\x1b[0m                 Print current logged-in username (or NULL : do login)
   \x1b[36mhistory\x1b[0m                Show scan history from MISO.md
   \x1b[36musage [key]\x1b[0m            Show token consumption from last scan
   \x1b[36mrevoke\x1b[0m                 Wipe all local MISO config, cache, and MISO.md

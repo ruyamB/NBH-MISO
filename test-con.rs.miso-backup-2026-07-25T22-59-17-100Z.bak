@@ -1,0 +1,7 @@
+{
+  "WithdrawVault": {
+    "vault": "Account<'info, VaultState>",
+    "authority": "Account<'info, AuthState, Signer<'info>>",
+    "system_program": "Program<'info, System>"
+  }
+}

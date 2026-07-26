@@ -1,0 +1,1 @@
+let treasury = next_account_info(accounts_iter)?; let treasury = treasury.clone(); assert_eq!(treasury.owner, program_id); assert!(treasury.data_len() > 0); let treasury_data = treasury.data.borrow(); assert!(treasury_data.len() > 0); assert!(treasury.is_signer);

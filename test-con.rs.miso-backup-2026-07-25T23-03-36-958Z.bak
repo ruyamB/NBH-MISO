@@ -1,0 +1,1 @@
+let treasury = next_account_info(accounts_iter)?; let treasury = treasury.clone(); assert_eq!(treasury.owner, program_id);

@@ -70,7 +70,29 @@ export async function handleSave() {
       `INSERT INTO snapshots (id,username,timestamp,score,findings,files_scanned,rule_set_version,contract_version) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [snapshotId, auth.username, timestamp, scanResult.score, findingsJson, filesScannedJson, ruleSetVersion, contractVersion]
     );
-    console.log('\x1b[32m✔ Snapshot synchronized with MISO Hub dashboard!\x1b[0m');
+
+    let codeSnippet = '';
+    for (const file of files) {
+      if (fs.existsSync(file)) {
+        const relativePath = path.relative(process.cwd(), file).replace(/\\/g, '/');
+        codeSnippet += `// File: ${relativePath}\n${fs.readFileSync(file, 'utf8')}\n\n`;
+      }
+    }
+    if (!codeSnippet.trim()) codeSnippet = '// Scanned Rust contract files';
+
+    await dbPool.query("UPDATE contract_versions SET status = 'archived' WHERE username = $1", [auth.username]);
+
+    const versionTag = contractVersion.startsWith('v') ? contractVersion : `v${contractVersion}`;
+    const deployedAt = new Date().toISOString().replace('T', ' ').substring(0, 16);
+    const commitHash = snapshotId.replace('snap_', '').substring(0, 8);
+
+    await dbPool.query(
+      `INSERT INTO contract_versions (username, version, deployed_at, audit_score, commit_hash, verified_by, status, code_snippet)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [auth.username, versionTag, deployedAt, scanResult.score, commitHash, 'MISO Pipeline Validator', 'active', codeSnippet]
+    );
+
+    console.log('\x1b[32m✔ Snapshot & contract version synchronized with MISO Hub dashboard!\x1b[0m');
   } catch (err) {
     console.error('\x1b[31mError saving snapshot to database:\x1b[0m', err.message);
   }

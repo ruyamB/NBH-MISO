@@ -1,8 +1,0 @@
-{
-  "CallAllowedProgram": {
-    "target_program": {
-      "type": "Account<'info, Program<'info, System>>",
-      "constraint": "target_program.executable"
-    }
-  }
-}
